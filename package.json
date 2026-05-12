@@ -1,0 +1,21 @@
+{
+  "name": "marketplace-microservicios",
+  "version": "1.0.0",
+  "description": "Mini plataforma funcional con microservicios (HTTP, JSON, SOAP)",
+  "main": "index.js",
+  "scripts": {
+    "start:gateway": "node api-gateway/index.js",
+    "start:usuarios": "node usuarios-service/index.js",
+    "start:productos": "node productos-service/index.js",
+    "start:ordenes": "node ordenes-service/index.js",
+    "start:pagos": "node pagos-soap-service/index.js",
+    "start:all": "concurrently \"npm run start:gateway\" \"npm run start:usuarios\" \"npm run start:productos\" \"npm run start:ordenes\" \"npm run start:pagos\""
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "body-parser-xml": "^2.0.5",
+    "concurrently": "^8.2.2",
+    "express": "^4.19.2",
+    "xml2js": "^0.6.2"
+  }
+}

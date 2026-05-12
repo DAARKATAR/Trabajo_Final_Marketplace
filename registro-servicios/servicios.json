@@ -1,0 +1,22 @@
+[
+  {
+    "nombre": "usuarios-service",
+    "url": "http://localhost:3001",
+    "descripcion": "Gestiona usuarios"
+  },
+  {
+    "nombre": "productos-service",
+    "url": "http://localhost:3002",
+    "descripcion": "Gestiona catálogo de productos"
+  },
+  {
+    "nombre": "ordenes-service",
+    "url": "http://localhost:3003",
+    "descripcion": "Gestiona compras"
+  },
+  {
+    "nombre": "pagos-soap-service",
+    "url": "http://localhost:3004",
+    "descripcion": "Procesa pagos en XML"
+  }
+]
