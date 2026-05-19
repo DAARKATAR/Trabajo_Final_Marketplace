@@ -1,0 +1,93 @@
+2. EXPLICACIÓN DE CADA MICROSERVICIO Y BASES DE DATOS LÓGICAS
+================================================================================
+Cada componente del sistema se ha diseñado bajo los principios de desacoplamiento y responsabilidad única, respetando la estructura de carpetas independiente y sus propias conexiones de base de datos.
+
+A. API Gateway (Carpeta: /api-gateway)
+- Rol: Punto de entrada único (Proxy Reverso) expuesto en el puerto 3000.
+- Responsabilidad: Enrutar de manera transparente las peticiones externas hacia las APIs internas. Centraliza la resolución de nombres resolviendo las URLs de destino a través de un JSON local que representa el registro UDDI.
+- Persistencia: No requiere base de datos (Stateless).
+
+B. Microservicio de Usuarios (Carpeta: /usuarios-service)
+- Rol: Gestión del ciclo de vida del usuario (puerto 3001).
+- Responsabilidad: Permite el registro, consulta, modificación y eliminación de usuarios (CRUD).
+- Conexión de Base de Datos: Se conecta a la base de datos lógica de PostgreSQL "usuarios_db" usando Spring Data JPA y el pool HikariCP (Configurado en /usuarios-service/src/main/resources/application.properties).
+- Tabla en Postgres:
+  CREATE TABLE usuarios (
+      id SERIAL PRIMARY KEY,
+      nombre VARCHAR(100) NOT NULL,
+      correo VARCHAR(100) UNIQUE NOT NULL,
+      contrasena VARCHAR(100) NOT NULL DEFAULT '123456'
+  );
+
+C. Microservicio de Productos (Carpeta: /productos-service)
+- Rol: Catálogo e inventario de productos (puerto 3002).
+- Responsabilidad: Mantenimiento del catálogo de artículos disponibles en el Marketplace (ID, nombre, precio base). El CRUD de creación y edición está restringido exclusivamente a usuarios con rol de Administrador.
+- Conexión de Base de Datos: Conexión aislada a la base de datos lógica de PostgreSQL "productos_db" usando Spring Data JPA (Configurado en /productos-service/src/main/resources/application.properties).
+- Tabla en Postgres:
+  CREATE TABLE productos (
+      id SERIAL PRIMARY KEY,
+      nombre VARCHAR(100) NOT NULL,
+      precio DECIMAL(10, 2) NOT NULL
+  );
+
+D. Microservicio de Órdenes (Carpeta: /ordenes-service)
+- Rol: Orquestación del flujo de compras (puerto 3003).
+- Responsabilidad: Valida la existencia del cliente, la disponibilidad del producto en sus servicios correspondientes, calcula el valor total de la compra, solicita el pago seguro al banco por SOAP/XML, y genera el registro de la transacción.
+- Conexión de Base de Datos: Conexión exclusiva a la base de datos lógica de PostgreSQL "ordenes_db" usando Spring Data JPA (Configurado en /ordenes-service/src/main/resources/application.properties).
+- Tabla en Postgres:
+  CREATE TABLE ordenes (
+      id SERIAL PRIMARY KEY,
+      usuario_id INTEGER NOT NULL,
+      producto_id INTEGER NOT NULL,
+      cantidad INTEGER NOT NULL,
+      total DECIMAL(10, 2) NOT NULL,
+      estado_pago VARCHAR(50) NOT NULL,
+      fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      codigo_compra VARCHAR(100),
+      productos_detalle TEXT
+  );
+
+E. Microservicio de Pagos SOAP/XML (Carpeta: /pagos-soap-service)
+- Rol: Banco Mock Legacy expuesto en el puerto 3004.
+- Responsabilidad: Simula el core bancario corporativo tradicional que recibe transferencias financieras formateadas exclusivamente en XML a través de una petición HTTP POST en la ruta `/pagos`.
+- Conexión de Base de Datos: Conexión exclusiva a la base de datos lógica de PostgreSQL "pagos_db" usando Spring Data JPA (Configurado en /pagos-soap-service/src/main/resources/application.properties) para persistir el historial de transacciones financieras procesadas.
+- Tabla en Postgres:
+  CREATE TABLE pagos (
+      id SERIAL PRIMARY KEY,
+      usuario_id INTEGER NOT NULL,
+      monto DECIMAL(10, 2) NOT NULL,
+      estado VARCHAR(50) NOT NULL,
+      fecha_procesamiento TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+F. Registro UDDI (Carpeta: /registro-servicios)
+- Rol: Service Directory o Páginas Amarillas del sistema.
+- Responsabilidad: Almacenar los metadatos de configuración de red de todos los servicios activos en el archivo de texto estructurado `servicios.json`. Evita que las rutas internas de los servicios se declaren estáticas en el código del Gateway.
+- Persistencia: No requiere conexión de base de datos activa (Stateless - Lee archivo JSON).
+
+================================================================================
+3. USO DE PATRÓN DTO (DATA TRANSFER OBJECTS) EN LA ARQUITECTURA
+================================================================================
+En microservicios con Spring Boot, el DTO es un objeto de transferencia de datos usado para desacoplar el modelo de datos interno (Entidades JPA) del payload enviado/recibido por las APIs externas.
+
+¿Por qué algunos servicios NO tienen DTOs y otros sí?
+
+1. Microservicio de Productos (NO tiene DTO):
+   - Justificación: Es una API CRUD puramente transaccional simple. Las propiedades de la entidad "Producto" (id, nombre, precio) corresponden exactamente 1:1 con lo que el frontend ingresa y necesita visualizar.
+   - Decisión: Crear un DTO duplicaría exactamente las propiedades de la entidad sin añadir valor de seguridad, mapeo o transformación, agregando boilerplate innecesario.
+
+2. API Gateway (NO tiene DTO):
+   - Justificación: Actúa puramente como Proxy Reverso y Enrutador dinámico. No procesa ni altera la estructura lógica del dominio, por lo que reenvía los cuerpos (payloads) de manera genérica usando objetos Maps nativos de Java.
+
+3. Microservicio de Usuarios (SÍ tiene DTO - LoginRequest):
+   - Justificación: Para el proceso de Login, el payload JSON contiene un campo genérico de correo (que sirve para ingresar nombre o correo) y la contraseña. Este formato de entrada no encaja de forma directa con la Entidad completa "Usuario" (la cual requiere más campos obligatorios).
+   - Decisión: Se expone "LoginRequest" para capturar las credenciales sin comprometer el mapeo JPA de la tabla de usuarios.
+
+4. Microservicio de Órdenes (SÍ tiene DTOs - OrdenRequest, ValidatedItem, OrdenResponse):
+   - Justificación: El desacoplamiento es indispensable aquí. La petición del cliente ("OrdenRequest") es un array de productos con ID y cantidad, mientras que la base de datos almacena una orden unificada con un solo registro en formato de texto JSON ("productos_detalle").
+   - Decisión: "OrdenRequest" y "OrdenResponse" manejan las entradas y salidas de la API (incluyendo el cálculo de totales dinámicos e IVA simulados), aislando por completo la entidad de base de datos "Orden" de los requisitos de la interfaz de usuario (React).
+
+5. Microservicio de Pagos (SÍ tiene DTOs - PagoXmlRequest, PagoXmlResponse):
+   - Justificación: Integración con protocolos externos específicos (XML/SOAP).
+   - Decisión: Se mapean los DTOs serializados a XML con anotaciones de Jackson para procesar los tags nativos `<pago>` y `<respuesta>`, independizándolos por completo de la entidad de persistencia JPA "Pago" que guarda la auditoría transaccional.
+

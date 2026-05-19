@@ -1,0 +1,41 @@
+{
+  "ejemplos_json": {
+    "registro_usuario": {
+      "peticion": {
+        "nombre": "Juan Pérez",
+        "correo": "juan.perez@email.com"
+      },
+      "respuesta": {
+        "id": 2,
+        "nombre": "Juan Pérez",
+        "correo": "juan.perez@email.com"
+      }
+    },
+    "crear_orden_conjunta": {
+      "peticion": {
+        "usuarioId": 1,
+        "productos": [
+          { "productoId": 1, "cantidad": 1 },
+          { "productoId": 3, "cantidad": 2 }
+        ]
+      },
+      "respuesta": {
+        "mensaje": "Orden conjunta creada y pagada con éxito",
+        "orden": {
+          "id": 1,
+          "codigoCompra": "ORD-543812",
+          "cantidad": 3,
+          "total": 130000,
+          "fecha_creacion": "2026-05-19T12:00:00.000Z",
+          "productos": [
+            { "productoId": 1, "cantidad": 1, "precio": 50000, "total": 50000 },
+            { "productoId": 3, "cantidad": 2, "precio": 40000, "total": 80000 }
+          ]
+        },
+        "codigoCompra": "ORD-543812",
+        "totalGeneral": 130000,
+        "estadoPago": "APROBADO"
+      }
+    }
+  }
+}

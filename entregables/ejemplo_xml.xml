@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ejemplos_xml>
+  <!-- Petición de pago enviada al servicio SOAP de Pagos -->
+  <peticion_pago>
+    <pago>
+      <usuarioId>1</usuarioId>
+      <monto>110000</monto>
+    </pago>
+  </peticion_pago>
+
+  <!-- Respuesta devuelta por el servicio SOAP de Pagos -->
+  <respuesta_pago>
+    <respuesta>
+      <estado>APROBADO</estado>
+      <codigo>200</codigo>
+    </respuesta>
+  </respuesta_pago>
+</ejemplos_xml>

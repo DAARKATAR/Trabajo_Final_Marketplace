@@ -1,0 +1,218 @@
+================================================================================
+EVIDENCIAS DE ARQUITECTURA DE MICROSERVICIOS: MARKETPLACE HÍBRIDO (REST/SOAP)
+================================================================================
+
+1. DIAGRAMA DE ARQUITECTURA DEL SISTEMA
+--------------------------------------------------------------------------------
+La topología del sistema representa una arquitectura descentralizada de microservicios con un API Gateway centralizador, un directorio de servicios desacoplado (UDDI) y canales híbridos de comunicación que combinan REST/JSON para servicios internos modernos y SOAP/XML para la integración con sistemas bancarios legacy (heredados). Cada microservicio de negocio (Usuarios, Productos, Órdenes, Pagos) opera con su propia base de datos lógica conectada a un servidor común de PostgreSQL, garantizando el aislamiento de datos (Database-per-Service pattern) y estructurado en Spring Boot y Maven.
+
+```mermaid
+graph TD
+    %% Definición de Estilos
+    classDef clientStyle fill:#ECEFF1,stroke:#37474F,stroke-width:2px,color:#37474F;
+    classDef gatewayStyle fill:#E1F5FE,stroke:#0288D1,stroke-width:2px,color:#01579B;
+    classDef registryStyle fill:#FFF3E0,stroke:#F57C00,stroke-width:2px,color:#E65100;
+    classDef serviceStyle fill:#E8F5E9,stroke:#388E3C,stroke-width:2px,color:#1B5E20;
+    classDef soapStyle fill:#FFEBEE,stroke:#D32F2F,stroke-width:2px,color:#D32F2F;
+    classDef dbStyle fill:#ECE0F8,stroke:#7D3C98,stroke-width:2px,color:#4A235A;
+
+    %% Nodos
+    Client["Cliente / Postman\n(HTTP Client)"]:::clientStyle
+    Gateway["API Gateway\n(Spring Boot - Puerto 3000)"]:::gatewayStyle
+    UDDI["Registro de Servicios (UDDI)\n(servicios.json)"]:::registryStyle
+    
+    SubGraph_Internal["Servicios Internos del Marketplace"]
+        Users["Usuarios Service\n(Spring Boot - Puerto 3001)"]:::serviceStyle
+        Products["Productos Service\n(Spring Boot - Puerto 3002)"]:::serviceStyle
+        Orders["Órdenes Service\n(Spring Boot - Puerto 3003)"]:::serviceStyle
+    end
+
+    Payments["Pagos SOAP Service\n(Spring Boot + XML - Puerto 3004)"]:::soapStyle
+
+    %% Bases de Datos Lógicas
+    DB_Users[("BD Lógica: usuarios_db\n(PostgreSQL)")]:::dbStyle
+    DB_Products[("BD Lógica: productos_db\n(PostgreSQL)")]:::dbStyle
+    DB_Orders[("BD Lógica: ordenes_db\n(PostgreSQL)")]:::dbStyle
+    DB_Payments[("BD Lógica: pagos_db\n(PostgreSQL)")]:::dbStyle
+
+    %% Relaciones
+    Client -->|HTTP REST JSON| Gateway
+    Gateway -.->|1. Consulta Endpoints| UDDI
+    Gateway -->|2a. Redirección REST/JSON| Users
+    Gateway -->|2b. Redirección REST/JSON| Products
+    Gateway -->|2c. Redirección REST/JSON| Orders
+
+    %% Conexiones a Bases de Datos
+    Users -->|Conexión Spring Data JPA| DB_Users
+    Products -->|Conexión Spring Data JPA| DB_Products
+    Orders -->|Conexión Spring Data JPA| DB_Orders
+    Payments -->|Conexión Spring Data JPA| DB_Payments
+
+    %% Flujo interno de Creación de Orden
+    Orders -->|3. GET /usuarios/:id (JSON)| Users
+    Orders -->|4. GET /productos/:id (JSON)| Products
+    Orders -->|5. POST /pagos (SOAP/XML)| Payments
+```
+
+Descripción del flujo de datos:
+1. El cliente inicia una transacción enviando un payload REST/JSON al API Gateway (puerto 3000).
+2. El API Gateway consulta el listado de servicios UDDI (servicios.json) para resolver dinámicamente la IP y puerto del microservicio destino.
+3. Al recibir una orden de compra, el microservicio de Órdenes (puerto 3003) realiza llamadas internas (GET) a los microservicios de Usuarios y Productos para validar datos corporativos.
+4. Los microservicios de Usuarios y Productos consultan y validan la información directamente en sus bases de datos lógicas aisladas ("usuarios_db" y "productos_db") en PostgreSQL.
+5. El microservicio de Órdenes procesa el pago enviando un XML al banco mock SOAP (puerto 3004).
+6. El microservicio de Pagos registra la transacción bancaria de forma aislada en su propia base de datos lógica "pagos_db" en PostgreSQL.
+7. Una vez que el banco retorna la aprobación en XML, el microservicio de Órdenes guarda la transacción en su base de datos lógica "ordenes_db" y retorna el estado de confirmación en JSON.
+
+
+2. EXPLICACIÓN DE CADA MICROSERVICIO Y BASES DE DATOS LÓGICAS
+--------------------------------------------------------------------------------
+Cada componente del sistema se ha diseñado bajo los principios de desacoplamiento y responsabilidad única, respetando la estructura de carpetas independiente y sus propias conexiones de base de datos.
+
+A. API Gateway (Carpeta: /api-gateway)
+- Rol: Punto de entrada único (Proxy Reverso) expuesto en el puerto 3000.
+- Responsabilidad: Enrutar de manera transparente las peticiones externas hacia las APIs internas. Centraliza la resolución de nombres resolviendo las URLs de destino a través de un JSON local que representa el registro UDDI.
+- Persistencia: No requiere base de datos (Stateless).
+
+B. Microservicio de Usuarios (Carpeta: /usuarios-service)
+- Rol: Gestión del ciclo de vida del usuario (puerto 3001).
+- Responsabilidad: Permite el registro, consulta, modificación y eliminación de usuarios (CRUD).
+- Conexión de Base de Datos: Se conecta a la base de datos lógica de PostgreSQL "usuarios_db" usando Spring Data JPA y el pool HikariCP (Configurado en /usuarios-service/src/main/resources/application.properties).
+- Tabla en Postgres:
+  CREATE TABLE usuarios (
+      id SERIAL PRIMARY KEY,
+      nombre VARCHAR(100) NOT NULL,
+      correo VARCHAR(100) UNIQUE NOT NULL,
+      contrasena VARCHAR(100) NOT NULL DEFAULT '123456'
+  );
+
+C. Microservicio de Productos (Carpeta: /productos-service)
+- Rol: Catálogo e inventario de productos (puerto 3002).
+- Responsabilidad: Mantenimiento del catálogo de artículos disponibles en el Marketplace (ID, nombre, precio base). El CRUD de creación y edición está restringido exclusivamente a usuarios con rol de Administrador.
+- Conexión de Base de Datos: Conexión aislada a la base de datos lógica de PostgreSQL "productos_db" usando Spring Data JPA (Configurado en /productos-service/src/main/resources/application.properties).
+- Tabla en Postgres:
+  CREATE TABLE productos (
+      id SERIAL PRIMARY KEY,
+      nombre VARCHAR(100) NOT NULL,
+      precio DECIMAL(10, 2) NOT NULL
+  );
+
+D. Microservicio de Órdenes (Carpeta: /ordenes-service)
+- Rol: Orquestación del flujo de compras (puerto 3003).
+- Responsabilidad: Valida la existencia del cliente, la disponibilidad del producto en sus servicios correspondientes, calcula el valor total de la compra, solicita el pago seguro al banco por SOAP/XML, y genera el registro de la transacción.
+- Conexión de Base de Datos: Conexión exclusiva a la base de datos lógica de PostgreSQL "ordenes_db" usando Spring Data JPA (Configurado en /ordenes-service/src/main/resources/application.properties).
+- Tabla en Postgres:
+  CREATE TABLE ordenes (
+      id SERIAL PRIMARY KEY,
+      usuario_id INTEGER NOT NULL,
+      producto_id INTEGER NOT NULL,
+      cantidad INTEGER NOT NULL,
+      total DECIMAL(10, 2) NOT NULL,
+      estado_pago VARCHAR(50) NOT NULL,
+      fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      codigo_compra VARCHAR(100),
+      productos_detalle TEXT
+  );
+
+E. Microservicio de Pagos SOAP/XML (Carpeta: /pagos-soap-service)
+- Rol: Banco Mock Legacy expuesto en el puerto 3004.
+- Responsabilidad: Simula el core bancario corporativo tradicional que recibe transferencias financieras formateadas exclusivamente en XML a través de una petición HTTP POST en la ruta `/pagos`.
+- Conexión de Base de Datos: Conexión exclusiva a la base de datos lógica de PostgreSQL "pagos_db" usando Spring Data JPA (Configurado en /pagos-soap-service/src/main/resources/application.properties) para persistir el historial de transacciones financieras procesadas.
+- Tabla en Postgres:
+  CREATE TABLE pagos (
+      id SERIAL PRIMARY KEY,
+      usuario_id INTEGER NOT NULL,
+      monto DECIMAL(10, 2) NOT NULL,
+      estado VARCHAR(50) NOT NULL,
+      fecha_procesamiento TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+F. Registro UDDI (Carpeta: /registro-servicios)
+- Rol: Service Directory o Páginas Amarillas del sistema.
+- Responsabilidad: Almacenar los metadatos de configuración de red de todos los servicios activos en el archivo de texto estructurado `servicios.json`. Evita que las rutas internas de los servicios se declaren estáticas en el código del Gateway.
+- Persistencia: No requiere conexión de base de datos activa (Stateless - Lee archivo JSON).
+
+
+3. EJEMPLOS DE FORMATO JSON USADO
+--------------------------------------------------------------------------------
+El formato JSON se utiliza para toda la comunicación interna REST del Marketplace.
+
+A. Creación de Usuario (Petición)
+{
+    "nombre": "Juan Pérez",
+    "correo": "juan.perez@email.com"
+}
+
+B. Creación de Usuario (Respuesta del servicio de Usuarios)
+{
+    "id": 2,
+    "nombre": "Juan Pérez",
+    "correo": "juan.perez@email.com"
+}
+
+C. Solicitud de Compra (Petición recibida por el Gateway / Órdenes)
+{
+    "usuarioId": 1,
+    "productos": [
+        { "productoId": 1, "cantidad": 2 }
+    ]
+}
+
+D. Confirmación de Compra Exitosa (Respuesta final de la transacción)
+{
+    "mensaje": "Orden conjunta creada y pagada con éxito",
+    "orden": {
+        "id": 1,
+        "codigoCompra": "ORD-123456",
+        "cantidad": 2,
+        "total": 110000.00,
+        "fecha_creacion": "2026-05-19T13:00:00",
+        "productos": [
+            {
+                "productoId": 1,
+                "cantidad": 2,
+                "precio": 55000.00,
+                "total": 110000.00
+            }
+        ]
+    },
+    "codigoCompra": "ORD-123456",
+    "totalGeneral": 110000.00,
+    "estadoPago": "APROBADO"
+}
+
+
+4. EJEMPLOS DE FORMATO XML USADO
+--------------------------------------------------------------------------------
+El formato XML se utiliza exclusivamente para interactuar con la pasarela bancaria externa SOAP.
+
+A. Petición de Cobro (Enviada de Órdenes a Pagos SOAP)
+<pago>
+  <usuarioId>1</usuarioId>
+  <monto>110000.00</monto>
+</pago>
+
+B. Respuesta de Aprobación Bancaria (Retornada por Pagos SOAP)
+<respuesta>
+  <estado>APROBADO</estado>
+  <codigo>200</codigo>
+</respuesta>
+
+5. JUSTIFICACIÓN DE DISEÑO: USO DEL PATRÓN DTO (DATA TRANSFER OBJECTS)
+--------------------------------------------------------------------------------
+En una arquitectura de microservicios robusta con Spring Boot, el patrón DTO se emplea para desacoplar las entidades JPA (modelo de persistencia físico) de las estructuras de datos expuestas externamente en las APIs REST/SOAP.
+
+A. Microservicio de Productos (NO requiere DTO):
+- Justificación: Es un CRUD transaccional básico e interno. Los atributos del Producto (id, nombre, precio) corresponden exactamente 1:1 con lo que el administrador registra y lo que el cliente final visualiza. Implementar un DTO añadiría mapeo y duplicación redundante de atributos sin valor agregado de seguridad o encapsulación.
+
+B. API Gateway (NO requiere DTO):
+- Justificación: Opera estrictamente como Proxy Reverso y Enrutador dinámico UDDI. No altera ni procesa la lógica del dominio, por lo que gestiona y delega los cuerpos (payloads) de forma dinámica usando estructuras de datos genéricas de Java (Maps).
+
+C. Microservicio de Usuarios (SÍ requiere DTO - LoginRequest):
+- Justificación: Para autenticar (login), el cliente envía únicamente credenciales en formato genérico (correo/nombre de usuario y contraseña). Mapear esta petición sobre la entidad completa "Usuario" (la cual requiere atributos adicionales de registro) rompería las validaciones del modelo. El DTO "LoginRequest" encapsula con seguridad los campos específicos requeridos en la verificación de sesión.
+
+D. Microservicio de Órdenes (SÍ requiere DTOs - OrdenRequest, ValidatedItem, OrdenResponse):
+- Justificación: Desacoplamiento total entre persistencia y entrada del cliente. La entidad relacional de base de datos "Orden" consolida la compra guardando un array serializado de productos en texto JSON ("productos_detalle"). El frontend en cambio envía una solicitud simplificada ("OrdenRequest") y espera recibir una respuesta detallada con formato de factura corporativa calculando subtotales en vivo ("OrdenResponse"). Los DTOs permiten este aislamiento de forma limpia.
+
+E. Microservicio de Pagos (SÍ requiere DTOs - PagoXmlRequest, PagoXmlResponse):
+- Justificación: Integración y traducción de protocolos específicos (REST a SOAP/XML). Permite procesar nativamente payloads XML serializados con etiquetas bancarias personalizadas (<pago>, <respuesta>) sin alterar la entidad interna de auditoría "Pago" mapeada en base de datos.
+================================================================================

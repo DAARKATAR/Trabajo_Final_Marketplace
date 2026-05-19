@@ -1,0 +1,60 @@
+1. DIAGRAMA DE ARQUITECTURA DEL SISTEMA
+================================================================================
+La topología del sistema representa una arquitectura descentralizada de microservicios con un API Gateway centralizador, un directorio de servicios desacoplado (UDDI) y canales híbridos de comunicación que combinan REST/JSON para servicios internos modernos y SOAP/XML para la integración con sistemas bancarios legacy (heredados). Cada microservicio de negocio (Usuarios, Productos, Órdenes, Pagos) opera con su propia base de datos lógica conectada a un servidor común de PostgreSQL, garantizando el aislamiento de datos (Database-per-Service pattern).
+
+```mermaid
+graph TD
+    %% Definición de Estilos
+    classDef clientStyle fill:#ECEFF1,stroke:#37474F,stroke-width:2px,color:#37474F;
+    classDef gatewayStyle fill:#E1F5FE,stroke:#0288D1,stroke-width:2px,color:#01579B;
+    classDef registryStyle fill:#FFF3E0,stroke:#F57C00,stroke-width:2px,color:#E65100;
+    classDef serviceStyle fill:#E8F5E9,stroke:#388E3C,stroke-width:2px,color:#1B5E20;
+    classDef soapStyle fill:#FFEBEE,stroke:#D32F2F,stroke-width:2px,color:#B71C1C;
+    classDef dbStyle fill:#ECE0F8,stroke:#7D3C98,stroke-width:2px,color:#4A235A;
+
+    %% Nodos
+    Client["Cliente / Postman\n(HTTP Client)"]:::clientStyle
+    Gateway["API Gateway\n(Express - Puerto 3000)"]:::gatewayStyle
+    UDDI["Registro de Servicios (UDDI)\n(servicios.json)"]:::registryStyle
+    
+    SubGraph_Internal["Servicios Internos del Marketplace"]
+        Users["Usuarios Service\n(Express - Puerto 3001)"]:::serviceStyle
+        Products["Productos Service\n(Express - Puerto 3002)"]:::serviceStyle
+        Orders["Órdenes Service\n(Express - Puerto 3003)"]:::serviceStyle
+    end
+
+    Payments["Pagos SOAP Service\n(Express + XML - Puerto 3004)"]:::soapStyle
+
+    %% Bases de Datos Lógicas
+    DB_Users[("BD Lógica: usuarios_db\n(PostgreSQL)")]:::dbStyle
+    DB_Products[("BD Lógica: productos_db\n(PostgreSQL)")]:::dbStyle
+    DB_Orders[("BD Lógica: ordenes_db\n(PostgreSQL)")]:::dbStyle
+    DB_Payments[("BD Lógica: pagos_db\n(PostgreSQL)")]:::dbStyle
+
+    %% Relaciones
+    Client -->|HTTP REST JSON| Gateway
+    Gateway -.->|1. Consulta Endpoints| UDDI
+    Gateway -->|2a. Redirección REST/JSON| Users
+    Gateway -->|2b. Redirección REST/JSON| Products
+    Gateway -->|2c. Redirección REST/JSON| Orders
+
+    %% Conexiones a Bases de Datos
+    Users -->|Conexión JDBC/pg| DB_Users
+    Products -->|Conexión JDBC/pg| DB_Products
+    Orders -->|Conexión JDBC/pg| DB_Orders
+    Payments -->|Conexión JDBC/pg| DB_Payments
+
+    %% Flujo interno de Creación de Orden
+    Orders -->|3. GET /usuarios/:id (JSON)| Users
+    Orders -->|4. GET /productos/:id (JSON)| Products
+    Orders -->|5. POST /pagos (SOAP/XML)| Payments
+```
+
+Descripción del flujo de datos:
+1. El cliente inicia una transacción enviando un payload REST/JSON al API Gateway (puerto 3000).
+2. El API Gateway consulta el listado de servicios UDDI (servicios.json) para resolver dinámicamente la IP y puerto del microservicio destino.
+3. Al recibir un carrito de compras, el microservicio de Órdenes (puerto 3003) realiza llamadas internas (GET) a los microservicios de Usuarios y Productos para iterar y validar todos los artículos de manera conjunta.
+4. Los microservicios de Usuarios y Productos consultan y validan la información directamente en sus bases de datos lógicas aisladas ("usuarios_db" y "productos_db") en PostgreSQL.
+5. El microservicio de Órdenes procesa el pago total enviando un XML consolidado al banco mock SOAP (puerto 3004).
+6. El microservicio de Pagos registra la transacción bancaria de forma aislada en su propia base de datos lógica "pagos_db" en PostgreSQL.
+7. Una vez que el banco retorna la aprobación en XML, el microservicio de Órdenes guarda la transacción consolidada en un único registro (almacenando el detalle JSON) en su base de datos "ordenes_db" y retorna la confirmación.
